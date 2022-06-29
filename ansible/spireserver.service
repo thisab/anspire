@@ -1,0 +1,15 @@
+[Unit]
+Description=Spire Server Service
+
+[Service]
+Type=simple
+ExecStart=spire-server run -config /opt/spire/conf/server/server.conf
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=spire
+Restart=on-failure
+
+
+[Install]
+WantedBy=multi-user.target
+

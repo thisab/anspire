@@ -1,0 +1,197 @@
+---
+- name: Install Spire
+  hosts: all
+  remote_user: cpqd
+  vars:
+    - spirever: 1.3.1
+  become: true
+  tags: install
+  tasks:
+
+  - name: Download SPIRE tar.gz to the Ansible bastion
+    delegate_to: localhost
+    get_url:
+      url: https://github.com/spiffe/spire/releases/download/v{{ spirever }}/spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
+      dest: /tmp/spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
+
+  - name: Copy tar file to servers
+    copy:
+      src: spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
+      dest: /root/spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
+
+  - name: Create the opt directory
+    file:
+      path: /opt/spire
+      state: directory
+      mode: '0755'
+
+  - name: untar SPIRE
+    unarchive:
+      src: spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
+      dest: /root
+    notify: copytar
+
+  handlers:
+  - name: Copy content to /opt
+    copy:
+      src: /root/spire-{{ spirever }}/.
+      dest: /opt/spire
+      remote_src: yes
+    listen: copytar
+
+
+  - name: Create a symbolic link to SPIRE Server
+    file:
+      src: /opt/spire/bin/spire-server
+      dest: /usr/bin/spire-server
+      state: link
+    listen: copytar
+
+  - name: Create a symbolic link to SPIRE Agent
+    file:
+      src: /opt/spire/bin/spire-agent
+      dest: /usr/bin/spire-agent
+      state: link
+    listen: copytar
+
+- name: Configure Spire Server on Domains
+  tags: confsrv
+  hosts: servers
+  remote_user: cpqd
+  become: true
+  tasks:
+    - name: change domain
+      lineinfile:
+        path: /opt/spire/conf/server/server.conf
+        regexp: '^    trust_domain = '
+        line: '    trust_domain = "{{ domainfqdn }}"'
+
+    - name: change CA expiration
+      lineinfile:
+        path: /opt/spire/conf/server/server.conf
+        regexp: '^    ca_ttl'
+        line: '    ca_ttl = "3000h"'
+
+    - name: change SVID TTL
+      lineinfile:
+        path: /opt/spire/conf/server/server.conf
+        regexp: '^    default_svid_ttl = '
+        line: '    default_svid_ttl = "2000h"'
+
+    - name: change bind
+      lineinfile:
+        path: /opt/spire/conf/server/server.conf
+        regexp: '^    bind_address'
+        line: '    bind_address = "0.0.0.0"'
+
+
+    - name: insertfederation
+      blockinfile:
+        path: /opt/spire/conf/server/server.conf
+        insertafter: '^    default_svid_ttl'
+        block: |2
+              federation {
+                bundle_endpoint {
+                address = "0.0.0.0"
+                port = 8443
+                }
+                federates_with "{{ federate }}" {
+                  bundle_endpoint_url = "https://{{ federate }}:8443"
+                  bundle_endpoint_profile "https_spiffe" {
+                  endpoint_spiffe_id = "spiffe://{{ federate }}/spire/server"
+                  }
+                }
+              }
+     
+    - name: Install Service File for Spire Server
+      copy:
+        src: spireserver.service
+        dest: /etc/systemd/system/spireserver.service
+
+    - name: Just force systemd to reread configs (2.4 and above)
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and Start Spire Server
+      systemd:
+        state: started
+        enabled: yes
+        name: spireserver
+
+    - name: Export Bundle
+      shell: 
+        cmd: "spire-server bundle show -format spiffe > /root/{{ domainfqdn }}.bundle"
+        creates: /root/{{ domainfqdn }}.bundle
+
+    - name: Transfer File to controller
+      fetch:
+        src: /root/{{ domainfqdn }}.bundle
+        dest: /tmp/{{ domainfqdn }}.bundle
+        flat: yes
+
+    - name: Now Exchange Files...
+      copy:
+        src: /tmp/{{ federate }}.bundle
+        dest: /root/{{ federate }}.bundle
+
+    - name: Install the new Bundle
+      command: spire-server bundle set -format spiffe -id spiffe://{{ federate }} -path /root/{{ federate }}.bundle
+
+- name: Create Spire Agent Tokens on Servers
+  tags: gentokens
+  hosts: servers
+  remote_user: cpqd
+  become: true
+  tasks:
+    - name: Create token and store
+      shell: "spire-server token generate -spiffeID spiffe://{{ domainfqdn }}/agent | awk '{print $2}' > /root/{{ domainfqdn }}-agent.token"
+
+    - name: Transfer Agent token File to controller
+      fetch:
+        src: /root/{{ domainfqdn }}-agent.token
+        dest: /tmp/{{ domainfqdn }}-agent.token
+        flat: yes
+
+
+- name: Configure Spire Agent on Domains
+  tags: confagents
+  hosts: nodes
+  remote_user: cpqd
+  become: true
+  tasks:
+    - name: change domain
+      lineinfile:
+        path: /opt/spire/conf/agent/agent.conf
+        regexp: '^    trust_domain = '
+        line: '    trust_domain = "{{ domainfqdn }}"'
+
+    - name: change server address
+      lineinfile:
+        path: /opt/spire/conf/agent/agent.conf
+        regexp: '^    server_address'
+        line: '    server_address = "{{ domainfqdn }}"'
+
+    - name: Copy TOken
+      copy:
+        src: /tmp/{{ domainfqdn }}-agent.token
+        dest: /root/{{ domainfqdn }}-agent.token
+
+    - name: Grab the Spire Server token
+      shell: "cat /root/{{ domainfqdn }}-agent.token"
+      register: token
+
+    - name: Template do Servico Agent
+      template:
+        src: spireagent.j2
+        dest: /etc/systemd/system/spireagent.service
+
+    - name: Just force systemd to reread configs (2.4 and above)
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and Start Agent Server
+      systemd:
+        state: started
+        enabled: yes
+        name: spireagent
+

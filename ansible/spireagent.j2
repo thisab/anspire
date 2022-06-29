@@ -1,0 +1,15 @@
+[Unit]
+Description=Spire Agent Service
+
+[Service]
+Type=simple
+ExecStart=spire-agent run -config /opt/spire/conf/agent/agent.conf -logLevel debug -joinToken {{ token.stdout }}
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=spireagent
+Restart=on-failure
+
+
+[Install]
+WantedBy=multi-user.target
+
