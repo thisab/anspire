@@ -60,28 +60,28 @@
       line: '        socketPath = "unix:///tmp/spire-agent/public/api.sock"'
     when: '"domain2nodes" in group_names'
 
-  - name: change socketpath
+  - name: change server address
     lineinfile:
       path: go-spiffe-main/v2/examples/spiffe-tls/client/main.go
       regexp: 'serverAddress ='
       line: '        serverAddress = "{{ groups["domain2nodes"][0] }}:55555"'
     when: '"domain1nodes" in group_names'
 
-  - name: change socketpath
+  - name: change server address
     lineinfile:
       path: go-spiffe-main/v2/examples/spiffe-tls/server/main.go
       regexp: 'serverAddress ='
       line: '        serverAddress = "{{ ansible_fqdn }}:55555"'
     when: '"domain2nodes" in group_names'
 
-  - name: change socketpath
+  - name: change client SPIFFE ID
     lineinfile:
       path: go-spiffe-main/v2/examples/spiffe-tls/client/main.go
       regexp: 'serverID :='
       line: '        serverID := spiffeid.RequireFromString("spiffe://{{ federate }}/servermtls")'
     when: '"domain1nodes" in group_names'
 
-  - name: change socketpath
+  - name: change server SPIFFE ID
     lineinfile:
       path: go-spiffe-main/v2/examples/spiffe-tls/server/main.go
       regexp: 'clientID :='
@@ -108,7 +108,7 @@
       dest: ./client-mtls
     when: '"domain1nodes" in group_names'
 
-  - name: Changing perm of "client", adding "+x"
+  - name: Changing perm of "client-mtls", adding "+x"
     file: dest=./client-mtls mode=a+x
     when: '"domain1nodes" in group_names'
 
@@ -119,7 +119,7 @@
       dest: ./server-mtls
     when: '"domain2nodes" in group_names'
 
-  - name: Changing perm of "client", adding "+x"
+  - name: Changing perm of "server-mtls", adding "+x"
     file: dest=./server-mtls mode=a+x
     when: '"domain2nodes" in group_names'
 
