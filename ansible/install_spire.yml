@@ -2,8 +2,8 @@
 - name: Install Spire
   hosts: all
   remote_user: cpqd
-  vars:
-    - spirever: 1.3.1
+  vars_files:
+    - vars/main.yml
   become: true
   tags: install
   tasks:
@@ -16,8 +16,8 @@
 
   - name: Copy tar file to servers
     copy:
-      src: spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
-      dest: /root/spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
+      src: /tmp/spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
+      dest: /tmp/spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
 
   - name: Create the opt directory
     file:
@@ -27,14 +27,16 @@
 
   - name: untar SPIRE
     unarchive:
-      src: spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
-      dest: /root
+      #remote_src: yes
+      #src: https://github.com/spiffe/spire/releases/download/v{{ spirever }}/spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
+      src: /tmp/spire-{{ spirever }}-linux-x86_64-glibc.tar.gz
+      dest: /tmp
     notify: copytar
 
   handlers:
   - name: Copy content to /opt
     copy:
-      src: /root/spire-{{ spirever }}/.
+      src: /tmp/spire-{{ spirever }}/.
       dest: /opt/spire
       remote_src: yes
     listen: copytar
@@ -58,6 +60,8 @@
   tags: confsrv
   hosts: servers
   remote_user: cpqd
+  vars_files:
+    - vars/main.yml
   become: true
   tasks:
     - name: change domain
@@ -67,16 +71,18 @@
         line: '    trust_domain = "{{ domainfqdn }}"'
 
     - name: change CA expiration
+      tags: timerchange
       lineinfile:
         path: /opt/spire/conf/server/server.conf
         regexp: '^    ca_ttl'
-        line: '    ca_ttl = "3000h"'
+        line: '    ca_ttl = "{{ ca_ttl }}"'
 
     - name: change SVID TTL
+      tags: timerchange
       lineinfile:
         path: /opt/spire/conf/server/server.conf
         regexp: '^    default_svid_ttl = '
-        line: '    default_svid_ttl = "2000h"'
+        line: '    default_svid_ttl = "{{ svid_ttl }}"'
 
     - name: change bind
       lineinfile:
@@ -113,28 +119,39 @@
         daemon_reload: yes
 
     - name: Enable and Start Spire Server
+      tags: timerchange
       systemd:
-        state: started
+        state: restarted
         enabled: yes
         name: spireserver
 
+    - name: Remove file (delete file)
+      tags: exchangebundle
+      file:
+        path: /root/{{ domainfqdn }}.bundle
+        state: absent
+
     - name: Export Bundle
+      tags: exchangebundle
       shell: 
         cmd: "spire-server bundle show -format spiffe > /root/{{ domainfqdn }}.bundle"
         creates: /root/{{ domainfqdn }}.bundle
 
     - name: Transfer File to controller
+      tags: exchangebundle
       fetch:
         src: /root/{{ domainfqdn }}.bundle
         dest: /tmp/{{ domainfqdn }}.bundle
         flat: yes
 
     - name: Now Exchange Files...
+      tags: exchangebundle
       copy:
         src: /tmp/{{ federate }}.bundle
         dest: /root/{{ federate }}.bundle
 
     - name: Install the new Bundle
+      tags: exchangebundle
       command: spire-server bundle set -format spiffe -id spiffe://{{ federate }} -path /root/{{ federate }}.bundle
 
 - name: Create Spire Agent Tokens on Servers

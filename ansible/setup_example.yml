@@ -1,0 +1,125 @@
+- name: Configure Context for User cpqd on a node from domain1 for a client app
+  tags: confcontext
+  hosts: domain1servers
+  remote_user: cpqd
+  become: true
+  tasks:
+    - name: Create entry in current domain for the client
+      shell:
+        cmd: 'spire-server entry create -parentID spiffe://{{ domainfqdn }}/agent -spiffeID spiffe://{{ domainfqdn }}/clientmtls -selector unix:user:cpqd -federatesWith "spiffe://{{ federate }}"'
+
+- name: Configure Context for User cpqd on a node from domain2 for a server app (HP.COM)
+  tags: confcontext
+  hosts: domain2servers
+  remote_user: cpqd
+  become: true
+  tasks:
+    - name: Create entry in current domain for the server
+      shell:
+        cmd: 'spire-server entry create -parentID spiffe://{{ domainfqdn }}/agent -spiffeID spiffe://{{ domainfqdn }}/servermtls -selector unix:user:cpqd -federatesWith "spiffe://{{ federate }}"'
+
+- name: Config
+  hosts: nodes
+  tags: client
+  gather_facts: yes
+  remote_user: cpqd
+  tasks:
+
+  - name: Update apt packages
+    become: true
+    apt:
+      update_cache: yes
+
+  - name: Install needed packages
+    become: true
+    tags: preinstall
+    apt:
+      pkg: "{{ item }}"
+    loop:
+      - unzip
+      - golang-go
+
+  - name: untar examples
+    tags: preinstall
+    unarchive:
+      remote_src: yes
+      src: https://github.com/spiffe/go-spiffe/archive/refs/heads/main.zip
+      dest: .
+
+  - name: change socketpath
+    lineinfile:
+      path: go-spiffe-main/v2/examples/spiffe-tls/client/main.go
+      regexp: 'socketPath    ='
+      line: '        socketPath = "unix:///tmp/spire-agent/public/api.sock"'
+    when: '"domain1nodes" in group_names'
+
+  - name: change socketpath
+    lineinfile:
+      path: go-spiffe-main/v2/examples/spiffe-tls/server/main.go
+      regexp: 'socketPath    ='
+      line: '        socketPath = "unix:///tmp/spire-agent/public/api.sock"'
+    when: '"domain2nodes" in group_names'
+
+  - name: change socketpath
+    lineinfile:
+      path: go-spiffe-main/v2/examples/spiffe-tls/client/main.go
+      regexp: 'serverAddress ='
+      line: '        serverAddress = "{{ groups["domain2nodes"][0] }}:55555"'
+    when: '"domain1nodes" in group_names'
+
+  - name: change socketpath
+    lineinfile:
+      path: go-spiffe-main/v2/examples/spiffe-tls/server/main.go
+      regexp: 'serverAddress ='
+      line: '        serverAddress = "{{ ansible_fqdn }}:55555"'
+    when: '"domain2nodes" in group_names'
+
+  - name: change socketpath
+    lineinfile:
+      path: go-spiffe-main/v2/examples/spiffe-tls/client/main.go
+      regexp: 'serverID :='
+      line: '        serverID := spiffeid.RequireFromString("spiffe://{{ federate }}/servermtls")'
+    when: '"domain1nodes" in group_names'
+
+  - name: change socketpath
+    lineinfile:
+      path: go-spiffe-main/v2/examples/spiffe-tls/server/main.go
+      regexp: 'clientID :='
+      line: '        clientID := spiffeid.RequireFromString("spiffe://{{ federate }}/clientmtls")'
+    when: '"domain2nodes" in group_names'
+
+
+  - name: build code for the client
+    shell:
+      cmd: go build main.go
+      chdir: go-spiffe-main/v2/examples/spiffe-tls/client
+    when: '"domain1nodes" in group_names'
+
+  - name: build code for the server
+    shell:
+      cmd: go build main.go
+      chdir: go-spiffe-main/v2/examples/spiffe-tls/server
+    when: '"domain2nodes" in group_names'
+
+  - name: Copy client binary
+    copy:
+      remote_src: yes
+      src: go-spiffe-main/v2/examples/spiffe-tls/client/main
+      dest: ./client-mtls
+    when: '"domain1nodes" in group_names'
+
+  - name: Changing perm of "client", adding "+x"
+    file: dest=./client-mtls mode=a+x
+    when: '"domain1nodes" in group_names'
+
+  - name: Copy server binary
+    copy:
+      remote_src: yes
+      src: go-spiffe-main/v2/examples/spiffe-tls/server/main
+      dest: ./server-mtls
+    when: '"domain2nodes" in group_names'
+
+  - name: Changing perm of "client", adding "+x"
+    file: dest=./server-mtls mode=a+x
+    when: '"domain2nodes" in group_names'
+

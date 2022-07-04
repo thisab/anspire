@@ -3,30 +3,32 @@ domain1nodes
 domain2nodes
 
 [domain1nodes]
-192.168.15.20
+node2.cpqd.com.br
 
 [domain1nodes:vars]
 domainfqdn=cpqd.com.br
+federate=hp.com
 
 [domain2nodes]
-192.168.15.21
+node1.hp.com
 
 [domain2nodes:vars]
 domainfqdn=hp.com
+federate=cpqd.com.br
 
 [servers:children]
 domain1servers
 domain2servers
 
 [domain1servers]
-192.168.15.22
+cpqd.com.br
 
 [domain1servers:vars]
 domainfqdn=cpqd.com.br
 federate=hp.com
 
 [domain2servers]
-192.168.15.23
+hp.com
 
 [domain2servers:vars]
 domainfqdn=hp.com

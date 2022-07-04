@@ -1,3 +1,3 @@
 spirever: 1.3.1
-ca_ttl: 3000h
-svid_ttl: 2000h
+ca_ttl: 5m
+svid_ttl: 3m
